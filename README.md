@@ -51,7 +51,7 @@ git clone https://github.com/krbuti/High-Throughput-LLM-Serving-Benchmark---vLLM
 cd High-Throughput-LLM-Serving-Benchmark---vLLM-vs.-baseline
 cp .env.example .env            # pick MODEL, set HF_TOKEN for gated models
 make install                    # client-side deps (no GPU needed)
-make test                       # 19 tests against the mock server (+5 HF-server tests if torch is installed)
+make test                       # 21 tests against the mock server (+5 HF-server tests if torch is installed)
 ```
 
 **Serve and watch it live**

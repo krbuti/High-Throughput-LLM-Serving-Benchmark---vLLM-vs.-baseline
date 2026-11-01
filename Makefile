@@ -29,7 +29,9 @@ bench-hf:
 	$(PY) -m bench.loadgen --base-url http://localhost:8001 --model $(MODEL) --label hf_quick \
 	  --concurrency 1 8 32 --num-prompts 48 --out results/quick/hf_quick.json
 
-sweep: build-hf     ## full grid (stop the compose servers first: it needs the GPU)
+sweep:              ## full grid (stop the compose servers first: it needs the GPU)
+	$(PY) -c "import sys; from bench.sweep import preflight; p = preflight(); [print('  -', x, file=sys.stderr) for x in p]; sys.exit(2 if p else 0)" || (echo "make sweep needs a GPU host with Docker + NVIDIA Container Toolkit (see README Quick start)" >&2; exit 2)
+	$(MAKE) build-hf
 	$(PY) -m bench.sweep configs/sweep.yaml
 
 sweep-dry:

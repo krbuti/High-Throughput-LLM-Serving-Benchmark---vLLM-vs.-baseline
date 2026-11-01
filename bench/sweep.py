@@ -188,6 +188,27 @@ def load_experiments(path: Path) -> list[dict]:
     return exps
 
 
+def preflight() -> list[str]:
+    """Return human-readable problems that would make every experiment fail."""
+    problems = []
+    try:
+        if subprocess.run(["docker", "info"], capture_output=True, timeout=30).returncode != 0:
+            problems.append("Docker is installed but the daemon isn't reachable (is it running? is your user in "
+                            "the 'docker' group?)")
+    except FileNotFoundError:
+        problems.append("Docker is not installed")
+    except subprocess.TimeoutExpired:
+        problems.append("'docker info' timed out")
+    try:
+        if subprocess.run(["nvidia-smi"], capture_output=True, timeout=30).returncode != 0:
+            problems.append("nvidia-smi failed: the NVIDIA driver isn't working")
+    except FileNotFoundError:
+        problems.append("nvidia-smi not found: this machine has no NVIDIA GPU/driver")
+    except subprocess.TimeoutExpired:
+        problems.append("'nvidia-smi' timed out")
+    return problems
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("config", type=Path)
@@ -199,6 +220,15 @@ def main(argv=None):
                    help="don't start containers; benchmark whatever is already on --base-url")
     p.add_argument("--base-url", default=f"http://localhost:{HOST_PORT}")
     a = p.parse_args(argv)
+
+    if not (a.dry_run or a.no_launch) and (problems := preflight()):
+        print("Can't run the sweep on this machine:", file=sys.stderr)
+        for pr in problems:
+            print(f"  - {pr}", file=sys.stderr)
+        print("It needs a Linux GPU host with the NVIDIA driver, Docker and the NVIDIA Container Toolkit. "
+              "See 'Quick start' in README.md. (--dry-run prints the commands without running them.)",
+              file=sys.stderr)
+        sys.exit(2)
 
     a.out_dir.mkdir(parents=True, exist_ok=True)
     failed = []
