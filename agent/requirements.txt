@@ -1,0 +1,5 @@
+langgraph==1.0.1
+langgraph-prebuilt==1.0.1
+langchain-core==1.0.1
+langchain-openai==1.0.1
+httpx>=0.27

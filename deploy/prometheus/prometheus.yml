@@ -1,0 +1,13 @@
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  # vLLM exposes vllm:* metrics on its API port.
+  - job_name: vllm
+    static_configs:
+      - targets: ["vllm:8000"]
+  # HF baseline exposes hf_* metrics.
+  - job_name: hf
+    static_configs:
+      - targets: ["hf:8001"]

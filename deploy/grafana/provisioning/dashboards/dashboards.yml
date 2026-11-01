@@ -1,0 +1,7 @@
+apiVersion: 1
+providers:
+  - name: llm-serving
+    folder: LLM Serving
+    type: file
+    options:
+      path: /var/lib/grafana/dashboards

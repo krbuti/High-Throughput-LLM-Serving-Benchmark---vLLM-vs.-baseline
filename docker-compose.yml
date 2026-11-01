@@ -1,0 +1,100 @@
+# One GPU usually can't hold both servers, so each is behind a profile:
+#
+#   docker compose --profile vllm up -d          # vLLM + Prometheus + Grafana
+#   docker compose --profile hf up -d            # HF baseline + Prometheus + Grafana
+#   docker compose --profile vllm --profile agent up   # + LangGraph agent
+#
+# Prometheus and Grafana have no profile, so they always start.
+
+x-gpu: &gpu
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            count: all
+            capabilities: [gpu]
+
+services:
+  vllm:
+    <<: *gpu
+    profiles: [vllm]
+    image: ${VLLM_IMAGE:-vllm/vllm-openai:v0.11.0}
+    ipc: host
+    ports: ["8000:8000"]
+    volumes:
+      - ${HF_CACHE:-~/.cache/huggingface}:/root/.cache/huggingface
+    environment:
+      HF_TOKEN: ${HF_TOKEN:-}
+    command:
+      - --model=${MODEL:-Qwen/Qwen2.5-3B-Instruct}
+      - --served-model-name=${MODEL:-Qwen/Qwen2.5-3B-Instruct}
+      - --max-model-len=${MAX_MODEL_LEN:-4096}
+      - --gpu-memory-utilization=${GPU_MEMORY_UTILIZATION:-0.90}
+      - --max-num-seqs=${MAX_NUM_SEQS:-256}
+      - --enable-prefix-caching
+      # Tool calling for the LangGraph agent (Qwen2.5 uses the hermes format).
+      - --enable-auto-tool-choice
+      - --tool-call-parser=hermes
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 900s
+    restart: unless-stopped
+
+  hf:
+    <<: *gpu
+    profiles: [hf]
+    build: ./servers/hf
+    image: llm-bench-hf:latest
+    ports: ["8001:8001"]
+    volumes:
+      - ${HF_CACHE:-~/.cache/huggingface}:/root/.cache/huggingface
+    environment:
+      HF_TOKEN: ${HF_TOKEN:-}
+      MODEL: ${MODEL:-Qwen/Qwen2.5-3B-Instruct}
+      MAX_MODEL_LEN: ${MAX_MODEL_LEN:-4096}
+      HF_MAX_BATCH_SIZE: ${HF_MAX_BATCH_SIZE:-1}
+      HF_BATCH_WAIT_MS: ${HF_BATCH_WAIT_MS:-10}
+    restart: unless-stopped
+
+  agent:
+    profiles: [agent]
+    build: ./agent
+    depends_on:
+      vllm:
+        condition: service_healthy
+    environment:
+      OPENAI_BASE_URL: http://vllm:8000/v1
+      OPENAI_API_KEY: EMPTY
+      MODEL: ${MODEL:-Qwen/Qwen2.5-3B-Instruct}
+    volumes:
+      - ./results:/app/results:ro
+    stdin_open: true
+    tty: true
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    ports: ["9090:9090"]
+    volumes:
+      - ./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=7d
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:12.1.1
+    ports: ["3000:3000"]
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/llm-serving.json
+    volumes:
+      - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on: [prometheus]
+    restart: unless-stopped

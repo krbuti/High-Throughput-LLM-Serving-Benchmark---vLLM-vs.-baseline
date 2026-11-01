@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+.env
+# container logs and ad-hoc runs; commit results/*.json and results/report/
+results/logs/
+results/quick/

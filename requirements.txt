@@ -1,0 +1,6 @@
+# Benchmark client, sweep runner and plots (runs anywhere, no GPU needed).
+httpx>=0.27
+numpy>=1.26
+pandas>=2.2
+matplotlib>=3.8
+pyyaml>=6.0

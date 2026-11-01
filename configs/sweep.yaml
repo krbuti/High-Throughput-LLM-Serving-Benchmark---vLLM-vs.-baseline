@@ -1,0 +1,100 @@
+# Experiment grid for `python -m bench.sweep configs/sweep.yaml`.
+#
+# Sized for a single 24 GB GPU (L4 / A10G) with a 3B model. On an A100/H100
+# switch `model` to Qwen/Qwen2.5-7B-Instruct and raise the HF batch sizes.
+#
+# Every experiment inherits `defaults`, and any key it sets overrides them.
+# vllm_args are passed straight to `vllm serve` (true -> --flag, false -> --no-flag).
+
+defaults:
+  model: Qwen/Qwen2.5-3B-Instruct
+  vllm_image: vllm/vllm-openai:v0.11.0
+  hf_image: llm-bench-hf:latest
+  startup_timeout: 1200
+  vllm_args:
+    max-model-len: 4096
+    gpu-memory-utilization: 0.90
+    max-num-seqs: 256
+    enable-prefix-caching: true
+  bench:
+    workload: random
+    num_prompts: 256
+    input_len: 512
+    output_len: 128
+    concurrency: [1, 4, 16, 64, 128]
+
+experiments:
+  # ---------------------------------------------------------------- baseline
+  # Plain transformers generate(). Fewer prompts: at concurrency 1 it is slow.
+  - name: hf_sequential
+    server: hf
+    description: HF Transformers, one request at a time
+    hf_env: {HF_MAX_BATCH_SIZE: 1}
+    bench: {num_prompts: 64, concurrency: [1, 4, 16, 32]}
+
+  - name: hf_static_bs8
+    server: hf
+    description: HF Transformers, static batching up to 8
+    hf_env: {HF_MAX_BATCH_SIZE: 8, HF_BATCH_WAIT_MS: 20}
+    bench: {num_prompts: 128, concurrency: [1, 4, 16, 32, 64]}
+
+  - name: hf_static_bs32
+    server: hf
+    description: HF Transformers, static batching up to 32
+    hf_env: {HF_MAX_BATCH_SIZE: 32, HF_BATCH_WAIT_MS: 20}
+    bench: {num_prompts: 128, concurrency: [1, 4, 16, 32, 64]}
+
+  # ------------------------------------------------------------------- vLLM
+  - name: vllm_default
+    description: vLLM, gpu-mem 0.90, max-num-seqs 256, prefix caching on
+
+  # ----------------------------------------------- continuous batching width
+  # max-num-seqs=1 turns vLLM into a sequential server: same PagedAttention
+  # kernels, no batching. Raising it shows what continuous batching buys.
+  - name: vllm_seqs_1
+    description: vLLM, max-num-seqs 1 (no batching)
+    vllm_args: {max-num-seqs: 1}
+    bench: {num_prompts: 64, concurrency: [1, 4, 16, 32]}
+  - name: vllm_seqs_8
+    vllm_args: {max-num-seqs: 8}
+  - name: vllm_seqs_32
+    vllm_args: {max-num-seqs: 32}
+  - name: vllm_seqs_128
+    vllm_args: {max-num-seqs: 128}
+
+  # ----------------------------------------- GPU memory -> KV cache capacity
+  # Less memory for the paged KV cache means fewer sequences fit at once, so
+  # the scheduler queues or preempts sooner. The sweep logs the KV size vLLM
+  # allocated for each setting.
+  - name: vllm_mem_0.40
+    vllm_args: {gpu-memory-utilization: 0.40}
+  - name: vllm_mem_0.55
+    vllm_args: {gpu-memory-utilization: 0.55}
+  - name: vllm_mem_0.70
+    vllm_args: {gpu-memory-utilization: 0.70}
+  - name: vllm_mem_0.95
+    vllm_args: {gpu-memory-utilization: 0.95}
+
+  # ------------------------------------------------------- chunked prefill
+  - name: vllm_batched_tokens_2048
+    description: vLLM, max-num-batched-tokens 2048 (smaller prefill chunks)
+    vllm_args: {max-num-batched-tokens: 2048}
+  - name: vllm_batched_tokens_8192
+    vllm_args: {max-num-batched-tokens: 8192}
+
+  # ------------------------------------------------------- prefix caching
+  # 2048-token prompts, 1792 tokens shared by every request (RAG/agent style).
+  - name: vllm_prefix_on
+    description: shared-prefix workload, prefix caching on
+    vllm_args: {enable-prefix-caching: true}
+    bench: {workload: shared-prefix, input_len: 2048, prefix_len: 1792, output_len: 64}
+  - name: vllm_prefix_off
+    description: shared-prefix workload, prefix caching off
+    vllm_args: {enable-prefix-caching: false}
+    bench: {workload: shared-prefix, input_len: 2048, prefix_len: 1792, output_len: 64}
+  - name: hf_prefix_bs8
+    server: hf
+    description: shared-prefix workload on HF static batching (no prefix cache)
+    hf_env: {HF_MAX_BATCH_SIZE: 8, HF_BATCH_WAIT_MS: 20}
+    bench: {workload: shared-prefix, input_len: 2048, prefix_len: 1792, output_len: 64,
+            num_prompts: 64, concurrency: [1, 4, 16, 32]}
